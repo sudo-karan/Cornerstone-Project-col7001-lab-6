@@ -148,7 +148,68 @@ To verify the full lifecycle and memory management features, a `comprehensive.la
 
 This sequence confirms the integrity of the Shell-VM IPC and the robustness of the memory manager.
 
-### 7.2 Compliance Matrix
+### 7.2 Verifying Block Scoping
+
+The compiler was tested with strict scoping rules to ensure block-local variables do not leak.
+
+**Test Case:** `scope_test.lang`
+
+```js
+{
+  var x = 5;
+}
+x = 10; // Should fail here
+```
+
+**Result:**
+Compilation fails with `Error: Undefined variable 'x'`, confirming that `x` was correctly removed from the symbol table upon block exit.
+
+### 7.3 Verifying Source-Level Debugging
+
+Debug metadata propagation was verified using the interactive debugger.
+
+**Test Case:** `debug_test.lang`
+
+```js
+var x = 10;
+var y = 20;
+print(x + y);
+```
+
+**Result:**
+Debugger output confirms precise line mapping:
+
+```
+vm-dbg> step
+[Source Line 1] PC: 0, Opcode: 0x01
+vm-dbg> step
+[Source Line 2] PC: 8, Opcode: 0x01
+```
+
+### 7.4 Verifying Leak Detection
+
+The VM's leak detector was verified by intentionally dropping pointers to allocated objects.
+
+**Test Case:** `mem_test.asm` (Assembly Injection)
+
+```asm
+PUSH 10
+ALLOC   ; Allocate object 1 (Heap[0])
+POP     ; Drop pointer -> LEAK!
+HALT
+```
+
+**Result:**
+The `leaks` command correctly identified the orphaned object:
+
+```
+vm-dbg> leaks
+[Leaks Report]
+  Leak: Object at Heap[0] (Size: 10 words)
+  Summary: 1 leaked objects, 10 total words.
+```
+
+### 7.5 Compliance Matrix
 
 | Requirement           | Status | Notes                                                       |
 | :-------------------- | :----- | :---------------------------------------------------------- |
