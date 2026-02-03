@@ -1,4 +1,4 @@
-# [INTEGRATION] COPIED FROM: Cornerstone-Project-col7001-lab-4-and-5
+
 import sys
 import struct
 
@@ -46,10 +46,12 @@ def assemble(input_file, output_file):
             if len(parts) > 1: 
                 addr += 4 # The argument (if present) takes 4 bytes (integer)
 
-    # --- Pass 2: Generate Bytecode ---
+    # --- Pass 2: Generate Bytecode & Debug Map ---
     # Now we scan the code a second time to actually generate the binary data.
     bytecode = bytearray()
-    
+    debug_map = [] # List of (address, line_number)
+    current_line = 0
+
     for line in lines:
         parts = line.split(';')[0].split()
         if not parts: continue
@@ -57,9 +59,20 @@ def assemble(input_file, output_file):
         # We already handled labels in Pass 1, so we just skip them here
         if parts[0].endswith(':'):
             continue
+            
+        # Handle .line directive
+        if parts[0] == '.line':
+            if len(parts) > 1:
+                current_line = int(parts[1])
+            continue
         
         instr = parts[0].upper()
         if instr in OPCODES:
+            # Record debug info for the start of this instruction
+            # Only checking "if current_line > 0" to avoid noise
+            if current_line > 0:
+                debug_map.append(f"{len(bytecode)} {current_line}\n")
+
             # 1. Write the Opcode
             bytecode.append(OPCODES[instr])
             
@@ -71,7 +84,11 @@ def assemble(input_file, output_file):
                 if arg in labels:
                     val = labels[arg] # Replace label with its calculated address
                 else:
-                    val = int(arg)    # Otherwise, treat it as a regular number
+                    try:
+                        val = int(arg)    # Otherwise, treat it as a regular number
+                    except ValueError:
+                        print(f"Error: Invalid argument '{arg}'")
+                        val = 0
                 
                 # Pack the value as a 32-bit little-endian integer
                 bytecode.extend(struct.pack("<i", val))
@@ -79,6 +96,13 @@ def assemble(input_file, output_file):
     # Write the final sequence of bytes to the output file
     with open(output_file, 'wb') as f:
         f.write(bytecode)
+        
+    # Write debug file (same base name as output, but with .dbg extension)
+    # If output is "prog.bin", debug is "prog.dbg"
+    dbg_file = output_file.rsplit('.', 1)[0] + ".dbg"
+    with open(dbg_file, 'w') as f:
+        f.writelines(debug_map)
+    print(f"Generated {output_file} and {dbg_file}")
 
 if __name__ == "__main__":
     # Ensure the user provides input and output filenames

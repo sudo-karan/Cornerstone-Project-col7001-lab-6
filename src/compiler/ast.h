@@ -19,7 +19,8 @@ typedef enum {
     NODE_VAR,      // "x" (using a variable)
     NODE_FUNC,      // Function Definition "func f() { ... }"
     NODE_RETURN,    // Return statement "return x;"
-    NODE_CALL       // Function call "f()" */
+    NODE_CALL,      // Function call "f()" */
+    NODE_PRINT      // Print statement "print(x);"
 } NodeType;
 
 // The Main Node Structure
@@ -41,6 +42,9 @@ typedef struct ASTNode {
     struct ASTNode *third;
     struct ASTNode *else_branch; // Only for IF-ELSE
     struct ASTNode *next;        // To link statements in a list
+    
+    // Debug Info
+    int line;
 } ASTNode;
 
 // Function Prototypes (We will implement these in ast.c)
@@ -59,5 +63,6 @@ void print_ast(ASTNode *node, int level);
 ASTNode* create_func(char* name, ASTNode* body);
 ASTNode* create_return(ASTNode* expr);
 ASTNode* create_call(char* name, ASTNode* arg);
+ASTNode* create_print(ASTNode* expr);
 
 #endif

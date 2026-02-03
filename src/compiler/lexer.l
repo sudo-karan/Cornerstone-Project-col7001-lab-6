@@ -1,4 +1,4 @@
-// [INTEGRATION] COPIED FROM: Cornerstone-Project-col7001-lab-2b-or-3/src
+
 %{
 #include <stdio.h>
 #include <stdlib.h>
@@ -27,6 +27,7 @@ void yyerror(const char *s);
 "while"             { return TOK_WHILE; }
 "func"              { return TOK_FUNC; }
 "return"            { return TOK_RETURN; }
+"print"             { return TOK_PRINT; }
 
 [0-9]+              { yylval.int_val = atoi(yytext); return TOK_NUM; }
 

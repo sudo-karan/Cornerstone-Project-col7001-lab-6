@@ -6,6 +6,8 @@
 #include "ast.h"
 
 
+extern int yylineno; // From Lexer
+
 // Helper to safely allocate memory
 ASTNode* new_node(NodeType type) {
     ASTNode *node = (ASTNode*)malloc(sizeof(ASTNode));
@@ -17,6 +19,7 @@ ASTNode* new_node(NodeType type) {
     node->left = node->right = node->else_branch = node->next = NULL;
     node->id = node->op = NULL;
     node->int_val = 0;
+    node->line = yylineno;
     return node;
 }
 
@@ -95,6 +98,12 @@ ASTNode* create_call(char* name, ASTNode* arg) {
     return node;
 }
 
+ASTNode* create_print(ASTNode* expr) {
+    ASTNode* node = new_node(NODE_PRINT);
+    node->left = expr;
+    return node;
+}
+
 // Simple recursive printer to see our tree structure
 void print_ast(ASTNode *node, int level) {
     if (!node) return;
@@ -114,8 +123,9 @@ void print_ast(ASTNode *node, int level) {
         case NODE_FUNC: printf("FUNC DEF: %s\n", node->id); break;
         case NODE_RETURN: printf("RETURN\n"); break;
         case NODE_CALL: printf("CALL: %s()\n", node->id); break;
+        case NODE_PRINT: printf("PRINT\n"); break;
     }
-
+    
     print_ast(node->left, level + 1);
     print_ast(node->right, level + 1);
     if (node->else_branch) print_ast(node->else_branch, level + 1);

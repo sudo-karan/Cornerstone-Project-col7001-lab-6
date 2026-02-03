@@ -1,4 +1,4 @@
-// [INTEGRATION] New file for Lab 6
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -50,6 +50,11 @@ int new_label() {
 void gen(ASTNode *node) {
     if (!node) return;
 
+    // Emit debug metadata (Line Number)
+    if (node->line > 0) {
+        printf(".line %d\n", node->line);
+    }
+
     switch (node->type) {
         case NODE_NUM:
             printf("PUSH %d\n", node->int_val);
@@ -100,36 +105,30 @@ void gen(ASTNode *node) {
             else if (strcmp(node->op, "-") == 0) printf("SUB\n");
             else if (strcmp(node->op, "*") == 0) printf("MUL\n");
             else if (strcmp(node->op, "/") == 0) printf("DIV\n");
-            else if (strcmp(node->op, "==") == 0) { printf("CMP\n"); /* CMP is <. Need EQ logic? VM lacks EQ. */ 
-                 // Wait, Lab 4 VM only has CMP (a < b).
-                 // We need to synthesize ==, !=, <=, >=.
-                 // a == b  <==>  !(a < b) && !(b < a)
-                 // This is expensive in this ISA.
-                 // For now, let's map everything to basic ops or assume extended ISA?
-                 // The prompt "reuse most if not all code" implies extending VM if needed.
-                 // But let's see. 
-                 // If I modify opcodes.h, I modify VM. This is allowed ("Lab 6... integrates").
-                 // But for "Lab 2B -> Lab 4 Bridge", I should stick to Lab 4 ISA.
-                 // Lab 4 ISA: CMP (a < b).
-                 // a == b -> (a - b) == 0.
-                 // We have JZ (Jump Zero).
-                 // So for "IF (a == b)", we compute a-b. If 0, then true.
-                 // But the AST is "expression". It yields a value on stack.
-                 // If we want 1 or 0 on stack:
-                 // (a - b) is 0 if equal.
-                 // We want 1 if 0.
-                 // This requires a "NOT" or "SEQ" instruction. Is there one? NO.
-                 // Workaround: Use jumps?
-                 // PUSH a, PUSH b, SUB.
-                 // DUP.
-                 // JZ TrueLabel
-                 // PUSH 0 (False)
-                 // JMP End
-                 // TrueLabel: POP (remove the 0), PUSH 1 (True)
-                 // End: ...
-                 // This is complex for a simple codegen.
-                 fprintf(stderr, "Warning: Equality '==' not fully supported by ISA CMP(LT) natively. Using SUB semantics (0=Equal).\n");
-                 printf("SUB\n"); // Kind of hacky. 0 means equal. Non-zero means unequal.
+            else if (strcmp(node->op, "==") == 0) { 
+                 // Equality Synthesis
+                 int l_eq = new_label();
+                 int l_done = new_label();
+
+                 // a == b  <==> (a - b) == 0
+                 // Stack: [a, b]
+                 printf("SUB\n"); 
+                 // Stack: [diff]
+                 
+                 printf("DUP\n");      // Duplicate diff to check it
+                 printf("JZ L%d\n", l_eq);
+                 
+                 // Case: Not Equal (diff != 0)
+                 printf("POP\n");      // Pop the diff
+                 printf("PUSH 0\n");   // Result False
+                 printf("JMP L%d\n", l_done);
+                 
+                 // Case: Equal (diff == 0)
+                 printf("L%d:\n", l_eq);
+                 printf("POP\n");      // Pop the diff (which is 0)
+                 printf("PUSH 1\n");   // Result True
+                 
+                 printf("L%d:\n", l_done);
             }
             else if (strcmp(node->op, "<") == 0) printf("CMP\n");
             else {
@@ -220,6 +219,12 @@ void gen(ASTNode *node) {
         case NODE_CALL: {
             // "name()"
             printf("CALL %s\n", node->id);
+            break;
+        }
+
+        case NODE_PRINT: {
+            gen(node->left); // Push expression
+            printf("PRINT\n");
             break;
         }
 

@@ -1,0 +1,5 @@
+var x = 0;
+// Infinite loop to test 'kill'
+while (x == 0) {
+    x = 0;
+}

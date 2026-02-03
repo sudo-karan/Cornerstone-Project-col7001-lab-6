@@ -1,4 +1,4 @@
-// [INTEGRATION] COPIED FROM: Cornerstone-Project-col7001-lab-2b-or-3/src
+
 %{
 #include <stdio.h>
 #include <stdlib.h>
@@ -31,11 +31,12 @@ ASTNode *root = NULL; // The final result of our parsing
 %token TOK_VAR TOK_IF TOK_ELSE TOK_WHILE
 %token TOK_EQ TOK_NEQ TOK_LE TOK_GE
 %token TOK_FUNC TOK_RETURN
+%token TOK_PRINT
 
 /* Which types do our grammar rules return? -> ASTNodes */
 %type <node> program statement_list statement block
 %type <node> variable_decl assignment if_statement while_statement
-%type <node> func_definition return_statement
+%type <node> func_definition return_statement print_statement
 %type <node> expression equality comparison term factor unary primary
 
 /* Operator Precedence (Lowest to Highest) */
@@ -72,6 +73,7 @@ statement:
     | block
     | func_definition
     | return_statement
+    | print_statement
     | error ';' { 
         yyerrok; // Tells Bison the error is handled
         printf("Recovering from syntax error at line %d...\n", yylineno);
@@ -127,6 +129,12 @@ func_definition:
 return_statement:
     TOK_RETURN expression ';' { 
         $$ = create_return($2); 
+    }
+    ;
+
+print_statement:
+    TOK_PRINT '(' expression ')' ';' {
+        $$ = create_print($3);
     }
     ;
 

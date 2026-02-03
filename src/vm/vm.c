@@ -1,8 +1,9 @@
-// [INTEGRATION] COPIED FROM: Cornerstone-Project-col7001-lab-4-and-5
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
 #include <string.h>
+#include <signal.h>
+#include <unistd.h>
 #include "opcodes.h"
 #include "jit.h"
 #include <time.h>
@@ -10,6 +11,68 @@
 #define STACK_SIZE 256
 #define MEM_SIZE 1024
 #define HEAP_SIZE 65536
+
+/* DEBUG METADATA */
+typedef struct {
+    int address;
+    int line_num;
+} DebugEntry;
+
+DebugEntry *debug_table = NULL;
+int debug_table_size = 0;
+
+void load_debug_info(const char *bin_filename) {
+    char dbg_filename[256];
+    strncpy(dbg_filename, bin_filename, sizeof(dbg_filename));
+    char *dot = strrchr(dbg_filename, '.');
+    if (dot) strcpy(dot, ".dbg");
+    else strcat(dbg_filename, ".dbg");
+
+    FILE *f = fopen(dbg_filename, "r");
+    if (!f) return; // No debug info
+
+    // First pass: count lines
+    int count = 0;
+    char line[128];
+    while (fgets(line, sizeof(line), f)) count++;
+    rewind(f);
+
+    debug_table = malloc(count * sizeof(DebugEntry));
+    debug_table_size = count;
+    
+    int i = 0;
+    while (fgets(line, sizeof(line), f)) {
+        int addr, ln;
+        if (sscanf(line, "%d %d", &addr, &ln) == 2) {
+            debug_table[i].address = addr;
+            debug_table[i].line_num = ln;
+            i++;
+        }
+    }
+    fclose(f);
+    printf("[VM] Loaded debug info from %s (%d entries)\n", dbg_filename, i);
+}
+
+int get_line_number(int pc) {
+    // Find entry with max address <= pc
+    int best_line = -1;
+    for (int i = 0; i < debug_table_size; i++) {
+        if (debug_table[i].address <= pc) {
+             // Because table is sorted by address (assembler writes sequentially), 
+             // we can just keep updating.
+             // Actually, assembler writes in order. 
+             // Ideally we want the EXACT address match or the associated block.
+             // But assembler.py maps "Instruction Start Address" -> "Line".
+             // If PC is inside an instruction (args), it works.
+             // Reset best_line if we find a closer one? 
+             // Since it's sorted, the 'last' one <= pc is the correct one.
+             best_line = debug_table[i].line_num;
+        } else {
+            break;
+        }
+    }
+    return best_line;
+}
 
 typedef struct {
     int32_t size;      // Payload size in words
@@ -42,8 +105,117 @@ typedef struct {
     uint8_t breakpoints[4096]; // Simple breakpoint map
 } VM;
 
+/* GLOBAL VM POINTER FOR SIGNALS */
+VM *global_vm = NULL;
+
+void mark(VM *vm, int32_t addr);
+void vm_gc(VM *vm);
+
+void handle_sigusr1(int sig) {
+    (void)sig;
+    if (global_vm) {
+        printf("\n[VM Memory Stats]\n");
+        printf("  Heap Used: %d / %d words\n", global_vm->free_ptr, HEAP_SIZE);
+        printf("  GC Runs: %d\n", global_vm->stats_gc_runs);
+        printf("  Freed Objects: %d\n", global_vm->stats_freed_objects);
+        // Calculate fragmentation or simple usage
+        int allocated_count = 0;
+        int curr = global_vm->allocated_list;
+        while(curr != -1) {
+            allocated_count++;
+            curr = global_vm->heap[curr + 1];
+        }
+        printf("  Live Objects: %d\n", allocated_count);
+        fsync(STDOUT_FILENO); // Ensure shell sees it
+    }
+}
+
+// Forward decl
+void check_leaks(VM *vm);
+
+void handle_sigusr2(int sig) {
+    (void)sig;
+    if (global_vm) {
+        // Trigger leak check asynchronously
+        check_leaks(global_vm);
+        fsync(STDOUT_FILENO);
+    }
+}
+
+
+void handle_sigurg(int sig) {
+    (void)sig;
+    if (global_vm) {
+        printf("\n[VM] Forcing Garbage Collection...\n");
+        vm_gc(global_vm);
+        printf("[VM] GC Complete. Heap: %d / %d words\n", global_vm->free_ptr, HEAP_SIZE);
+        fsync(STDOUT_FILENO);
+    }
+}
+
+// Reuse mark logic for LEAKS command
+// (Prototype definition to match valid C)
+void mark(VM *vm, int32_t addr);
+
+void check_leaks(VM *vm) {
+    // 1. Clear all marks
+    int curr = vm->allocated_list;
+    while (curr != -1) {
+        vm->heap[curr+2] = 0;
+        curr = vm->heap[curr+1];
+    }
+
+    // 2. Mark Roots
+    for (int i = 0; i <= vm->sp; i++) {
+        int32_t val = vm->stack[i];
+         if (val >= MEM_SIZE && val < MEM_SIZE + HEAP_SIZE) {
+            int32_t payload_idx = val - MEM_SIZE;
+            int32_t header_idx = payload_idx - 3;
+            if (header_idx >= 0) mark(vm, header_idx);
+        }
+    }
+    // Check Memory Roots too (Global Vars)
+    for (int i=0; i<MEM_SIZE; i++) {
+        int32_t val = vm->memory[i];
+         if (val >= MEM_SIZE && val < MEM_SIZE + HEAP_SIZE) {
+            int32_t payload_idx = val - MEM_SIZE;
+            int32_t header_idx = payload_idx - 3;
+            if (header_idx >= 0) mark(vm, header_idx);
+        }
+    }
+
+    // 3. Scan for UNMARKED objects
+    printf("[Leaks Report]\n");
+    int leaks_found = 0;
+    int total_bytes = 0;
+    curr = vm->allocated_list;
+    while (curr != -1) {
+        if (vm->heap[curr+2] == 0) {
+            int size = vm->heap[curr];
+            printf("  Leak: Object at Heap[%d] (Size: %d words)\n", curr, size);
+            leaks_found++;
+            total_bytes += size;
+        }
+        curr = vm->heap[curr+1];
+    }
+    
+    if (leaks_found == 0) {
+        printf("  No leaks detected.\n");
+    } else {
+        printf("  Summary: %d leaked objects, %d total words.\n", leaks_found, total_bytes);
+    }
+}
+
 void run_debug_shell(VM *vm) {
     char line[128];
+    // Show current line info
+    if (debug_table) {
+        int source_line = get_line_number(vm->pc);
+        if (source_line != -1) {
+            printf("[Source Line %d] ", source_line);
+        }
+    }
+
     while (1) {
         printf("vm-dbg> ");
         if (fgets(line, sizeof(line), stdin) == NULL) break;
@@ -58,20 +230,18 @@ void run_debug_shell(VM *vm) {
             return; // Run until next breakpoint
         }
         else if (strcmp(line, "registers") == 0 || strcmp(line, "r") == 0) {
-            printf("PC: %d, SP: %d, FP: N/A\n", vm->pc, vm->sp);
+            printf("PC: %d, SP: %d, RSP: %d\n", vm->pc, vm->sp, vm->rsp);
             if (vm->sp >= 0) printf("Top of Stack: %d\n", vm->stack[vm->sp]);
         }
-        else if (strncmp(line, "print ", 6) == 0) {
-            // print stack or memory
-            // Implementation simplified
+        else if (strcmp(line, "leaks") == 0) {
+            check_leaks(vm);
         }
         else if (strcmp(line, "quit") == 0) {
             vm->running = 0;
             return;
         }
         else if (strcmp(line, "memstat") == 0) {
-             printf("Allocated Objects: N/A (Need traversal)\n");
-             printf("Free Ptr: %d\n", vm->free_ptr);
+             printf("Heap Ptr: %d\n", vm->free_ptr);
         }
         else if (strncmp(line, "break ", 6) == 0) {
             int addr = atoi(line + 6);
@@ -81,7 +251,7 @@ void run_debug_shell(VM *vm) {
             }
         }
         else {
-            printf("Commands: step, continue, registers, memstat, break <addr>, quit\n");
+            printf("Commands: step, continue, registers, memstat, leaks, break <addr>, quit\n");
         }
     }
 }
@@ -167,6 +337,16 @@ void vm_gc(VM *vm) {
             }
         }
     }
+    
+    // Scan Memory too (Globals)
+     for (int i=0; i<MEM_SIZE; i++) {
+        int32_t val = vm->memory[i];
+         if (val >= MEM_SIZE && val < MEM_SIZE + HEAP_SIZE) {
+            int32_t payload_idx = val - MEM_SIZE;
+            int32_t header_idx = payload_idx - 3;
+            if (header_idx >= 0) mark(vm, header_idx);
+        }
+    }
 
     // 2. Sweep Phase
     sweep(vm);
@@ -211,6 +391,11 @@ void run_vm(VM *vm) {
     vm->stats_freed_objects = 0;
     vm->stats_total_gc_time = 0.0;
     vm->stats_max_heap_used = 0;
+    
+    global_vm = vm;
+    signal(SIGUSR1, handle_sigusr1);
+    signal(SIGUSR2, handle_sigusr2);
+    signal(SIGURG, handle_sigurg);
 
     // We assume the code size is large enough or trusted, assuming proper loader checks.
     // In a real VM, you'd also check bounds of vm->pc against code size.
@@ -427,6 +612,11 @@ void run_vm(VM *vm) {
             vm->error = 1;
         }
     }
+
+    if (vm->debug_mode && !vm->error) {
+         printf("[DEBUG] Execution Finished.\n");
+         run_debug_shell(vm);
+    }
 }
 
 #ifndef TESTING
@@ -458,14 +648,10 @@ int run_vm_main(int argc, char **argv) {
 
     // Check for JIT flag or Debug flag
     int use_jit = 0;
-    if (argc > 2) {
-        if (strcmp(argv[2], "--jit") == 0) use_jit = 1;
-        if (strcmp(argv[2], "--debug") == 0) vm.debug_mode = 1;
-    }
-    // Check 3rd arg too
-    if (argc > 3) {
-        if (strcmp(argv[3], "--jit") == 0) use_jit = 1;
-        if (strcmp(argv[3], "--debug") == 0) vm.debug_mode = 1;
+    // Simple arg parsing logic loop
+    for(int i=2; i<argc; i++) {
+        if (strcmp(argv[i], "--jit") == 0) use_jit = 1;
+        if (strcmp(argv[i], "--debug") == 0) vm.debug_mode = 1;
     }
 
     if (use_jit) {
@@ -482,6 +668,7 @@ int run_vm_main(int argc, char **argv) {
     } else {
         if (vm.debug_mode) {
             printf("VM running in DEBUG mode. Type 'help' for commands.\n");
+            load_debug_info(argv[1]);
             vm.step_mode = 1; // Start paused
         }
         run_vm(&vm);
@@ -498,5 +685,6 @@ int run_vm_main(int argc, char **argv) {
     }
 
     free(code);
+    if (debug_table) free(debug_table);
     return vm.error ? 1 : 0;
 }

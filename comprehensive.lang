@@ -1,0 +1,16 @@
+var i = 0;
+var ptr = 0;
+
+print(8888); // Marker start
+
+while (i < 10000) {
+    // Allocate some garbage
+    ptr = 0; // Lost reference to previous allocations (if we did alloc)
+    // We don't have arrays yet, just simulate busy work
+    i = i + 1;
+}
+
+// Infinite loop to keep process alive for shell commands
+while (1) {
+    i = i + 1;
+}

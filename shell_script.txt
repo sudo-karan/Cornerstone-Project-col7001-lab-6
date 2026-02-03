@@ -1,0 +1,12 @@
+submit debug_test.lang
+debug 1
+step
+step
+step
+quit
+submit loop.lang
+run 2 &
+memstat 2
+kill 2
+sys
+exit
