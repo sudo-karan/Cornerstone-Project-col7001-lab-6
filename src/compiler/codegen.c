@@ -176,11 +176,17 @@ void gen(ASTNode *node) {
         }
 
         case NODE_BLOCK: {
+            Symbol *saved_sym_table = sym_table; // Save visibility state
+            
             ASTNode *stmt = node->left;
             while (stmt) {
                 gen(stmt);
                 stmt = stmt->next;
             }
+            
+            // Restore visibility state (popping block-local variables)
+            // Note: We do NOT reset global_addr_counter so addresses don't collide
+            sym_table = saved_sym_table;
             break;
         }
 

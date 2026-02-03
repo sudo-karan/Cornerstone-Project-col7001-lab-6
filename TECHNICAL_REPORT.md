@@ -58,7 +58,8 @@ The Compiler translates a high-level C-like language into the VM's assembly lang
 - **Lexical Analysis (Flex):** Tokenizes input. Crucially, it tracks line numbers via `yylineno`.
 - **Parsing (Bison):** Constructs an Abstract Syntax Tree (AST). We enhanced `ast.h` to include an `int line;` field in `ASTNode`.
 - **AST Enhancement:** During AST node creation (`new_node`), the current `yylineno` is captured and stored. This binds every syntactic construct (assignment, loop, print) to its source origin.
-- **Code Generation:** The `gen()` function is a recursive visitor. Before generating code for a node, it checks if `node->line` is valid. If so, it emits a `.line <number>` directive into the assembly output. This is the foundation of source-level debugging.
+- **Code Generation:** The `gen()` function is a recursive visitor. Before generating code for a statement-level node, it checks if `node->line` is valid. If so, it emits a `.line <number>` directive into the assembly output. This is the foundation ofsource-level debugging.
+- **Block Scoping:** The compiler implements local scoping for blocks (`{ ... }`). The symbol table state is saved upon entering a block and restored upon exit, ensuring that variables declared inside a block are not accessible outside it.
 
 ### 3.3 The Assembler (Backend & Metadata)
 

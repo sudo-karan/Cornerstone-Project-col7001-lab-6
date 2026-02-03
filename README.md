@@ -206,6 +206,17 @@ The compiler has been enhanced to support `print()` statements, which emit the `
 print(10 + 20); // Output: 30
 ```
 
+### Block Scoping
+
+The compiler supports C-style block scoping. Variables declared inside `{ }` are not visible outside.
+
+```js
+{
+  var x = 5;
+}
+x = 10; // Compiler Error: Undefined variable 'x'
+```
+
 ---
 
 ## Project Structure
